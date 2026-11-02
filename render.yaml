@@ -1,0 +1,20 @@
+# Render.com deployment config for PATCHLINE (static site)
+# Docs: https://render.com/docs/deploy-static-site
+services:
+  - type: web
+    name: patchline
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+    routes:
+      # Single-page app: serve index.html for any path
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff

@@ -1,0 +1,186 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ */
+/* PATCHLINE design tokens                                             */
+/* ------------------------------------------------------------------ */
+
+@theme inline {
+  --color-canvas: var(--pl-canvas);
+  --color-panel: var(--pl-panel);
+  --color-raised: var(--pl-raised);
+  --color-ink: var(--pl-ink);
+  --color-muted: var(--pl-muted);
+  --color-line: var(--pl-line);
+  --color-line-strong: var(--pl-line-strong);
+  --color-accent: var(--pl-accent);
+  --color-accent-soft: var(--pl-accent-soft);
+  --color-danger: var(--pl-danger);
+  --color-danger-soft: var(--pl-danger-soft);
+  --color-warn: var(--pl-warn);
+  --color-warn-soft: var(--pl-warn-soft);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Menlo, monospace;
+}
+
+:root,
+[data-theme="dark"] {
+  --pl-canvas: #101311;
+  --pl-panel: #191f1b;
+  --pl-raised: #29332c;
+  --pl-ink: #e7eae5;
+  --pl-muted: #9ca69c;
+  --pl-line: rgba(231, 234, 229, 0.08);
+  --pl-line-strong: rgba(231, 234, 229, 0.16);
+  --pl-accent: #789477;
+  --pl-accent-soft: rgba(120, 148, 119, 0.14);
+  --pl-danger: #c75a50;
+  --pl-danger-soft: rgba(199, 90, 80, 0.16);
+  --pl-warn: #d6a45b;
+  --pl-warn-soft: rgba(214, 164, 91, 0.16);
+  --pl-glass: rgba(25, 31, 27, 0.82);
+  --pl-glass-line: rgba(231, 234, 229, 0.14);
+}
+
+/* Warm-neutral light theme — a complementary palette, not an inversion. */
+[data-theme="light"] {
+  --pl-canvas: #f1efe8;
+  --pl-panel: #fbfaf5;
+  --pl-raised: #ffffff;
+  --pl-ink: #1c211c;
+  --pl-muted: #68705f;
+  --pl-line: rgba(28, 33, 28, 0.1);
+  --pl-line-strong: rgba(28, 33, 28, 0.2);
+  --pl-accent: #466049;
+  --pl-accent-soft: rgba(70, 96, 73, 0.12);
+  --pl-danger: #ab4439;
+  --pl-danger-soft: rgba(171, 68, 57, 0.12);
+  --pl-warn: #9a6f2b;
+  --pl-warn-soft: rgba(154, 111, 43, 0.14);
+  --pl-glass: rgba(251, 250, 245, 0.86);
+  --pl-glass-line: rgba(28, 33, 28, 0.14);
+}
+
+/* ------------------------------------------------------------------ */
+/* Base                                                                */
+/* ------------------------------------------------------------------ */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--pl-canvas);
+  color: var(--pl-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+::after,
+::before {
+  border-color: var(--pl-line);
+}
+
+:focus-visible {
+  outline: 2px solid var(--pl-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::selection {
+  background: var(--pl-accent-soft);
+}
+
+/* Slim scrollbars that match the surface palette */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--pl-line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--pl-line-strong);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes pl-skeleton {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Glass — reserved for floating map UI, popovers and modals only      */
+/* ------------------------------------------------------------------ */
+
+.glass {
+  background: var(--pl-glass);
+  backdrop-filter: blur(8px) saturate(1.1);
+  -webkit-backdrop-filter: blur(8px) saturate(1.1);
+  border: 1px solid var(--pl-glass-line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="light"] .glass {
+  box-shadow: 0 8px 24px rgba(28, 33, 28, 0.12);
+}
+
+/* ------------------------------------------------------------------ */
+/* Leaflet adjustments                                                 */
+/* ------------------------------------------------------------------ */
+
+.leaflet-container {
+  background: var(--pl-canvas);
+  font-family: var(--font-sans);
+}
+
+.leaflet-control-attribution {
+  background: var(--pl-glass) !important;
+  color: var(--pl-muted) !important;
+  font-size: 10px !important;
+  border-radius: 4px 0 0 0;
+  padding: 1px 6px !important;
+}
+.leaflet-control-attribution a {
+  color: var(--pl-muted) !important;
+}
+
+.pl-poly {
+  transition: fill-opacity 120ms ease, stroke-width 120ms ease, stroke-opacity 120ms ease;
+  cursor: pointer;
+}
+
+.pl-poly:hover {
+  fill-opacity: 0.38 !important;
+  stroke-opacity: 1 !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Reduced motion                                                      */
+/* ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

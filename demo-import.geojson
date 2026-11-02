@@ -1,0 +1,35 @@
+{
+  "type": "FeatureCollection",
+  "name": "patchline-demo-import",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "NDVI drop cluster A (Jun→Oct)", "mean_delta_ndvi": -0.31 },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [79.895, 17.968],
+          [79.905, 17.968],
+          [79.908, 17.962],
+          [79.902, 17.958],
+          [79.894, 17.96],
+          [79.895, 17.968]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "NDVI drop cluster B", "mean_delta_ndvi": -0.24 },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [79.915, 18.012],
+          [79.925, 18.012],
+          [79.925, 18.006],
+          [79.915, 18.006],
+          [79.915, 18.012]
+        ]]
+      }
+    }
+  ]
+}
