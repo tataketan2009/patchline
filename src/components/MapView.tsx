@@ -266,7 +266,11 @@ export default function MapView({
       setShowFires(false);
       return;
     }
-    const key = localStorage.getItem("firms-map-key");
+    // Key precedence: visitor's own key (Settings) → build-time env var (baked in on Render) → none
+    const key =
+      localStorage.getItem("firms-map-key") ||
+      (import.meta.env.VITE_FIRMS_KEY as string | undefined) ||
+      "";
     if (!key) {
       toast.push("warning", "FIRMS key missing", "Paste your free NASA FIRMS MAP_KEY in Settings to enable live fire data.");
       return;
