@@ -31,32 +31,11 @@ import { Chip } from "./ui";
 import { AnimatePresence, motion } from "framer-motion";
 import { useToast } from "../lib/toast";
 import { downloadEvidenceReport } from "../lib/report";
-
-/** Accepts a GeoJSON FeatureCollection and returns polygon rings as [lat, lon][]. */
-function parseGeoJSON(gj: { type: string; features?: unknown[] }): [number, number][][] {
-  const out: [number, number][][] = [];
-  const features = gj.type === "FeatureCollection" ? (gj.features ?? []) : [gj];
-  for (const f of features) {
-    const g = (f as { geometry?: typeof f })?.geometry ?? f;
-    if (!g) continue;
-    const t = (g as { type?: string }).type;
-    const shapes: unknown[] = [];
-    if (t === "Polygon") shapes.push((g as { coordinates: unknown }).coordinates);
-    else if (t === "MultiPolygon")
-      shapes.push(...((g as { coordinates: unknown[] }).coordinates));
-    for (const s of shapes) {
-      const ring = (s as [number, number][][])[0];
-      if (Array.isArray(ring)) out.push(ring.map(([lon, lat]) => [lat, lon] as [number, number]));
-    }
-  }
-  return out;
-}
+import { parseGeoJSON } from "../lib/geojson";
 
 /* ------------------------------------------------------------------ */
 /* Basemaps                                                            */
-/* ------------------------------------------------------------------ */
-
-const BASEMAPS = {
+/* ------------------------------------------------------------------ */const BASEMAPS = {
   satellite: {
     label: "Satellite",
     url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -205,12 +184,23 @@ export function DetectionPanel({
 
       <div className="mt-4 flex gap-2 border-t border-line pt-3">
         <button
+          onClick={() => {
+            location.hash = `#/detection/${detection.id}`;
+            onClose();
+          }}
+          className="flex-1 rounded-md border border-line-strong px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-raised"
+        >
+          Full page ↗
+        </button>
+        <button
           onClick={() => downloadEvidenceReport(detection)}
           className="rounded-md border border-line-strong px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-raised"
           aria-label="Download evidence report"
         >
           Report
         </button>
+      </div>
+      <div className="mt-2 flex gap-2">
         <button
           onClick={() => onEscalate(detection)}
           disabled={detection.status === "investigating"}
@@ -259,6 +249,28 @@ export default function MapView({
   const [fireDots, setFireDots] = useState<
     { id: string; lat: number; lon: number; frp: number; date: string; conf: string }[]
   >([]);
+  const [dateCut, setDateCut] = useState<0 | 14 | 90>(0);
+  const [regionFilter, setRegionFilter] = useState("all");
+
+  const regionTokens = useMemo(
+    () => Array.from(new Set(DETECTIONS.map((d) => d.region.split(" ")[0]))).sort(),
+    [],
+  );
+
+  const refDate = useMemo(() => new Date("2026-11-02"), []);
+  const daysSince = (d: Detection) => Math.round((refDate.getTime() - new Date(d.date).getTime()) / 86400000);
+
+  const visible = useMemo(
+    () =>
+      DETECTIONS.filter(
+        (d) =>
+          activeSeverities.has(d.severity) &&
+          (dateCut === 0 || daysSince(d) <= dateCut) &&
+          (regionFilter === "all" || d.region.startsWith(regionFilter)),
+      ),
+    [activeSeverities, regionFilter, dateCut, daysSince],
+  );
+
 
   /** Fetches NASA FIRMS VIIRS hotspots for the sanctuary box (needs dev proxy + MAP_KEY). */
   const toggleFires = async () => {
@@ -351,11 +363,6 @@ export default function MapView({
 
 
   const selected = useMemo(() => DETECTIONS.find((d) => d.id === selectedId) ?? null, [selectedId]);
-
-  const visible = useMemo(
-    () => DETECTIONS.filter((d) => activeSeverities.has(d.severity)),
-    [activeSeverities],
-  );
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -515,6 +522,35 @@ export default function MapView({
           </div>
 
           <div className="glass flex items-center gap-1.5 rounded-md px-2 py-1.5">
+            <span className="pl-1 pr-1 text-[10px] font-semibold uppercase tracking-wider text-muted">Dates</span>
+            {([0, 14, 90] as const).map((days) => (
+              <Chip key={days} active={dateCut === days} onClick={() => setDateCut(days)}>
+                {days === 0 ? "All" : `≤${days}d`}
+              </Chip>
+            ))}
+          </div>
+
+          <div className="glass flex items-center gap-2 rounded-md px-2 py-1.5">
+            <span className="pl-1 text-[10px] font-semibold uppercase tracking-wider text-muted">Region</span>
+            <label className="sr-only" htmlFor="region-filter">
+              Filter by region
+            </label>
+            <select
+              id="region-filter"
+              value={regionFilter}
+              onChange={(e) => setRegionFilter(e.target.value)}
+              className="bg-transparent text-[11px] font-medium text-ink outline-none [&>option]:bg-panel"
+            >
+              <option value="all">All regions</option>
+              {regionTokens.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="glass flex items-center gap-1.5 rounded-md px-2 py-1.5">
             <span className="pl-1 pr-1 text-[10px] font-semibold uppercase tracking-wider text-muted">Severity</span>
             {(["critical", "high", "medium", "low"] as Severity[]).map((s) => (
               <Chip key={s} active={activeSeverities.has(s)} color={SEVERITY_COLOR[s]} onClick={() => toggleSeverity(s)}>
@@ -564,6 +600,39 @@ export default function MapView({
             </button>
           )}
         </div>
+
+        {/* Legend */}
+        {!selected && (
+          <div className="glass pointer-events-auto absolute bottom-16 left-3 z-[800] rounded-md p-2.5">
+            <p className="pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted">Legend</p>
+            <ul className="space-y-1">
+              {(["critical", "high", "medium", "low"] as Severity[]).map((s) => (
+                <li key={s} className="flex items-center gap-1.5 text-[11px] text-ink">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: SEVERITY_COLOR[s] }} aria-hidden />
+                  <span className="capitalize">{s} detection</span>
+                </li>
+              ))}
+              <li className="flex items-center gap-1.5 text-[11px] text-ink">
+                <span
+                  className="w-4 border-t-2 border-dashed"
+                  style={{ borderColor: "var(--pl-accent)" }}
+                  aria-hidden
+                />
+                Sanctuary boundary
+              </li>
+              <li className="flex items-center gap-1.5 text-[11px] text-ink">
+                <span className="w-4 border-t-2 border-dashed border-accent" aria-hidden />
+                Analyst / imported layers
+              </li>
+              {showFires && (
+                <li className="flex items-center gap-1.5 text-[11px] text-ink">
+                  <span className="h-2 w-2 rounded-full bg-warn" aria-hidden />
+                  Live FIRMS hotspot
+                </li>
+              )}
+            </ul>
+          </div>
+        )}
 
         {/* Layer switcher + analyst import */}
         <div className="glass pointer-events-auto absolute bottom-9 left-3 z-[800] flex items-center gap-0.5 rounded-md p-1">

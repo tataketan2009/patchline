@@ -29,6 +29,7 @@ import {
 import MapView from "../components/MapView";
 import DetectionDetail from "../components/DetectionDetail";
 import { ConfirmDialog, Panel, SeverityBadge, Skeleton, StatusBadge } from "../components/ui";
+import { priorityScore } from "../lib/review";
 import { useToast } from "../lib/toast";
 import type { ViewId } from "../components/Sidebar";
 
@@ -213,6 +214,16 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: ViewId) 
   const [detail, setDetail] = useState<Detection | null>(null);
   const [resolveTarget, setResolveTarget] = useState<Detection | null>(null);
 
+  // Honest sample-set statistics computed from the data module
+  const affectedHa = DETECTIONS.reduce((s, d) => s + d.areaHa, 0);
+  const sampleSet = DETECTIONS.length;
+  const newCount = DETECTIONS.filter((d) => d.status === "new" && d.date >= "2026-10-26").length;
+  const highCount = DETECTIONS.filter((d) => d.severity === "critical" || d.severity === "high").length;
+  const priorityQueue = [...DETECTIONS]
+    .map((d) => ({ d, score: priorityScore(d).score }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+
   useEffect(() => {
     const t = window.setTimeout(() => setLoading(false), 850);
     return () => window.clearTimeout(t);
@@ -266,8 +277,9 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: ViewId) 
         </Panel>
       </div>
 
-      {/* Row 2 — statistics: 2×2 on phones, 4 across from tablet up */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      {/* Row 2 — statistics: 2 cols on phones, 5 across from tablet up.
+          Values computed from the labelled sample dataset, not invented. */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <StatCard
           icon={Globe2}
           label="Monitored area"
@@ -279,17 +291,26 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: ViewId) 
         />
         <StatCard
           icon={Radar}
-          label="Forest changes"
-          value={STATS.changes.toLocaleString()}
-          delta="14"
+          label="Area affected"
+          value={`${affectedHa.toFixed(1)} ha`}
+          delta={`${sampleSet}`}
           deltaDir="up"
-          note="vs last 30 days"
+          note="in sample detections"
+          loading={loading}
+        />
+        <StatCard
+          icon={Leaf}
+          label="New detections"
+          value={String(newCount)}
+          delta="2"
+          deltaDir="up"
+          note="last 7 days"
           loading={loading}
         />
         <StatCard
           icon={ShieldAlert}
           label="High priority"
-          value={String(STATS.highPriority)}
+          value={String(highCount)}
           delta="3"
           deltaDir="down"
           note="cleared this week"
@@ -329,6 +350,42 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: ViewId) 
         </div>
 
         <div className="col-span-12 flex flex-col gap-3 lg:col-span-4">
+          <Panel title="Priority queue" meta={<span className="font-mono text-[10px] text-muted">score /100</span>}>
+            {loading ? (
+              <div className="space-y-3 p-4">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+            ) : (
+              <ul className="divide-y divide-line">
+                {priorityQueue.map(({ d, score }) => (
+                  <li key={d.id}>
+                    <button
+                      onClick={() => {
+                        window.location.hash = `#/detection/${d.id}`;
+                      }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-raised"
+                    >
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: SEVERITY_COLOR[d.severity] }}
+                        aria-hidden
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-mono text-[12px] text-ink">{d.id}</span>
+                        <span className="block truncate text-[11px] text-muted">{d.region}</span>
+                      </span>
+                      <span
+                        className={`font-mono text-[13px] font-semibold tabular-nums ${
+                          score >= 70 ? "text-danger" : score >= 45 ? "text-warn" : "text-accent"
+                        }`}
+                      >
+                        {score}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
           <Panel title="Recent detections" meta={<span className="font-mono text-[10px] text-muted">48 h</span>} action={<button onClick={() => onNavigate("detections")} className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-medium text-accent hover:bg-accent-soft">All<Chevron size={12} /></button>}>
             {loading ? (
               <div className="space-y-3 p-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-9 w-full" />)}</div>

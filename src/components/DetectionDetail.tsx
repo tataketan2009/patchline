@@ -34,6 +34,15 @@ export default function DetectionDetail({
             <span className="text-[12px] text-muted">·</span>
             <SeverityBadge severity={detection.severity} />
             <StatusBadge status={detection.status} />
+            <button
+              onClick={() => {
+                window.location.hash = `#/detection/${detection.id}`;
+                onClose();
+              }}
+              className="ml-auto text-[12px] font-medium text-accent hover:underline"
+            >
+              Open full page ↗
+            </button>
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">

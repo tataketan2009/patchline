@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -28,6 +29,7 @@
     "tailwindcss": "^4.3.3",
     "typescript": "~7.0.2",
     "vite": "^8.3.5",
-    "vite-plugin-singlefile": "^2.3.4"
+    "vite-plugin-singlefile": "^2.3.4",
+    "vitest": "^5.1.0"
   }
 }
