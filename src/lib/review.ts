@@ -56,7 +56,11 @@ function load(): Record<string, ReviewEntry> {
 }
 
 function save(state: Record<string, ReviewEntry>) {
-  localStorage.setItem(KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(KEY, JSON.stringify(state));
+  } catch {
+    /* non-fatal: review state just won't survive a reload */
+  }
 }
 
 export function getReview(id: string): ReviewEntry {

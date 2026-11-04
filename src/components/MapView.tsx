@@ -257,19 +257,17 @@ export default function MapView({
     [],
   );
 
-  const refDate = useMemo(() => new Date("2026-11-02"), []);
-  const daysSince = (d: Detection) => Math.round((refDate.getTime() - new Date(d.date).getTime()) / 86400000);
-
-  const visible = useMemo(
-    () =>
-      DETECTIONS.filter(
-        (d) =>
-          activeSeverities.has(d.severity) &&
-          (dateCut === 0 || daysSince(d) <= dateCut) &&
-          (regionFilter === "all" || d.region.startsWith(regionFilter)),
-      ),
-    [activeSeverities, regionFilter, dateCut, daysSince],
-  );
+  const visible = useMemo(() => {
+    // Fixed anchor date: the sample dataset uses static 2026 dates.
+    const ref = new Date("2026-11-02").getTime();
+    const daysSince = (d: Detection) => Math.round((ref - new Date(d.date).getTime()) / 86400000);
+    return DETECTIONS.filter(
+      (d) =>
+        activeSeverities.has(d.severity) &&
+        (dateCut === 0 || daysSince(d) <= dateCut) &&
+        (regionFilter === "all" || d.region.startsWith(regionFilter)),
+    );
+  }, [activeSeverities, regionFilter, dateCut]);
 
 
   /** Fetches NASA FIRMS VIIRS hotspots for the sanctuary box (needs dev proxy + MAP_KEY). */
@@ -279,10 +277,13 @@ export default function MapView({
       return;
     }
     // Key precedence: visitor's own key (Settings) → build-time env var (baked in on Render) → none
-    const key =
-      localStorage.getItem("firms-map-key") ||
-      (import.meta.env.VITE_FIRMS_KEY as string | undefined) ||
-      "";
+    let storedKey = "";
+    try {
+      storedKey = localStorage.getItem("firms-map-key") ?? "";
+    } catch {
+      /* storage blocked — fall through to env var */
+    }
+    const key = storedKey || (import.meta.env.VITE_FIRMS_KEY as string | undefined) || "";
     if (!key) {
       toast.push("warning", "FIRMS key missing", "Paste your free NASA FIRMS MAP_KEY in Settings to enable live fire data.");
       return;
@@ -340,6 +341,9 @@ export default function MapView({
   const onImportFile = (file: File | undefined) => {
     if (!file) return;
     const reader = new FileReader();
+    reader.onerror = () => {
+      toast.push("danger", "Import failed", `The browser could not read ${file.name}.`);
+    };
     reader.onload = () => {
       try {
         const gj = JSON.parse(String(reader.result));

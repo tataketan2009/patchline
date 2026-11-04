@@ -10,6 +10,24 @@ export type Theme = "dark" | "light";
 
 const STORAGE_KEY = "patchline-theme";
 
+/** Storage can throw when blocked (private browsing, restricted webviews). */
+function readStored(): Theme {
+  try {
+    const v = localStorage.getItem(STORAGE_KEY);
+    return v === "light" || v === "dark" ? v : "dark";
+  } catch {
+    return "dark";
+  }
+}
+
+function persist(t: Theme) {
+  try {
+    localStorage.setItem(STORAGE_KEY, t);
+  } catch {
+    /* non-fatal: theme just won't survive a reload */
+  }
+}
+
 interface ThemeCtx {
   theme: Theme;
   setTheme: (t: Theme) => void;
@@ -19,14 +37,11 @@ interface ThemeCtx {
 const Ctx = createContext<ThemeCtx>({ theme: "dark", setTheme: () => {}, toggle: () => {} });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    return stored === "light" || stored === "dark" ? stored : "dark";
-  });
+  const [theme, setThemeState] = useState<Theme>(readStored);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem(STORAGE_KEY, theme);
+    persist(theme);
   }, [theme]);
 
   return (

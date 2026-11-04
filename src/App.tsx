@@ -62,6 +62,7 @@ function Shell() {
         <main id="main-content" className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4" tabIndex={-1}>
           {detailId != null ? (
             <DetectionPage
+              key={detailId}
               id={detailId}
               onBack={() => {
                 window.location.hash = "";

@@ -60,6 +60,9 @@ PATCHLINE — Forest Intelligence Platform · Synthetic demo dataset for interfa
   const a = document.createElement("a");
   a.href = url;
   a.download = `patchline-evidence-${d.id}.html`;
+  // Some engines only allow downloads from anchors attached to the DOM.
+  document.body.appendChild(a);
   a.click();
+  a.remove();
   URL.revokeObjectURL(url);
 }

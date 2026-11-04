@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ArrowLeft,
   Copy,
@@ -63,11 +63,6 @@ export default function DetectionPage({ id, onBack }: { id: string; onBack: () =
   const detection = useMemo(() => DETECTIONS.find((d) => d.id === id) ?? null, [id]);
   const [review, setReviewState] = useState(() => getReview(id));
   const [notes, setNotes] = useState(() => getReview(id).notes);
-
-  useEffect(() => {
-    setReviewState(getReview(id));
-    setNotes(getReview(id).notes);
-  }, [id]);
 
   if (!detection) {
     return (
