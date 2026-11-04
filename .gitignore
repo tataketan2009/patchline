@@ -4,3 +4,6 @@ dist
 .DS_Store
 
 __pycache__/
+backend/patchline.db
+.pytest_cache/
+backend/.pytest_cache/

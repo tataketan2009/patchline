@@ -1,26 +1,60 @@
 """
-PATCHLINE FastAPI wrapper around the baseline change-detection pipeline.
+PATCHLINE backend API — the complete backend, written entirely in Python.
 
-Clearly-labelled baseline. Emits advisory GeoJSON candidates for human
-review; never fabricates confidence scores or asserts illegality.
+FastAPI service that owns ALL application state:
+  • SQLite persistence (std library sqlite3)
+  • Explainable priority scoring (scoring.py)
+  • Six-stage investigation review workflow
+  • Alerts, activity, region status, statistics
+  • Baseline NDVI-diff change-detection pipeline (pipeline.py, STAC/Sentinel-2)
+  • Pipeline output import into the detection store
+  • Evidence report generation (markdown download)
+  • Optional serving of the built frontend (../dist) — one Python process
+
+Run:  uvicorn main:app --reload --port 8000     (from inside backend/)
 """
+
+from __future__ import annotations
+
+import json
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from pipeline import run_detection, STAC_URL, COLLECTION
+from config import (
+    DEMO_NOTE,
+    DIST_DIR,
+    REGION,
+    REGION_BOUNDARY,
+    REVIEW_LABELS,
+    REVIEW_STATUSES,
+)
+import store
+from scoring import priority_score
 
-app = FastAPI(title="PATCHLINE baseline change-detection API", version="0.1.0")
+app = FastAPI(title="PATCHLINE forest intelligence API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # demo; restrict in production
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+store.init_db()
 
-class BBox(BaseModel):
+
+# ---------------------------------------------------------------- schemas ---
+
+class ReviewPatch(BaseModel):
+    status: Literal["new", "under-review", "verified", "false-positive", "escalated", "resolved"] | None = None
+    notes: str | None = None
+
+
+class PipelineRun(BaseModel):
     minLon: float
     minLat: float
     maxLon: float
@@ -30,26 +64,238 @@ class BBox(BaseModel):
     after_from: str = Field(examples=["2025-10-01"])
     after_to: str = Field(examples=["2025-10-31"])
     max_cloud: float = 20.0
+    import_result: bool = False  # store candidates as detections in the DB
 
 
-@app.get("/health")
+# ------------------------------------------------------------------ meta ---
+
+@app.get("/api/health")
 def health():
     return {
         "status": "ok",
-        "pipeline": "baseline-ndvi-difference (not a neural network)",
-        "source": {"stac": STAC_URL, "collection": COLLECTION},
-        "note": "Advisory output for human review; no fabricated confidence.",
+        "backend_language": "python",
+        "pipeline": "baseline-ndvi-difference (classical — NOT a neural network)",
+        "storage": f"sqlite ({store.DB_PATH.name})",
+        "note": "Advisory output for human review; no fabricated confidence scores.",
     }
 
 
-@app.post("/detect")
-def detect(b: BBox):
+@app.get("/api/meta")
+def meta():
+    """Region info + enums the frontend needs to render."""
+    return {
+        "region": REGION,
+        "boundary": REGION_BOUNDARY,
+        "reviewStatuses": [{"id": s, "label": REVIEW_LABELS[s]} for s in REVIEW_STATUSES],
+        "demoNote": DEMO_NOTE,
+    }
+
+
+# ------------------------------------------------------ detections/review ---
+
+@app.get("/api/detections")
+def detections(
+    severity: str | None = None,
+    status: str | None = None,
+    region: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    sort: Literal["priority", "date"] = "date",
+):
+    rows = store.list_detections(
+        severity=severity, status=status, region_prefix=region,
+        date_from=from_date, date_to=to_date,
+    )
+    for d in rows:
+        d["priority"] = priority_score(d)
+    if sort == "priority":
+        rows.sort(key=lambda d: d["priority"]["score"], reverse=True)
+    return {"detections": rows, "demoNote": DEMO_NOTE}
+
+
+@app.get("/api/detections/{det_id}")
+def detection_detail(det_id: str):
+    d = store.get_detection(det_id)
+    if not d:
+        raise HTTPException(404, f"Detection {det_id} not found")
+    d["priority"] = priority_score(d)
+    d["review"] = store.get_review(det_id)
+    d["demoNote"] = DEMO_NOTE
+    return d
+
+
+@app.patch("/api/detections/{det_id}/review")
+def update_review(det_id: str, patch: ReviewPatch):
+    if not store.get_detection(det_id):
+        raise HTTPException(404, f"Detection {det_id} not found")
     try:
-        result = run_detection(
-            (b.minLon, b.minLat, b.maxLon, b.maxLat),
-            b.before_from, b.before_to, b.after_from, b.after_to,
-            b.max_cloud,
+        review = store.set_review(det_id, patch.status, patch.notes)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"review": review}
+
+
+@app.get("/api/detections/{det_id}/report")
+def evidence_report(det_id: str):
+    """Downloadable evidence report (markdown). Includes honest limitations."""
+    d = store.get_detection(det_id)
+    if not d:
+        raise HTTPException(404, f"Detection {det_id} not found")
+    p = priority_score(d)
+    r = store.get_review(det_id)
+    lines = [
+        f"# PATCHLINE evidence report — {d['id']}",
+        "",
+        f"**Region:** {d['region']}  ",
+        f"**Detection date:** {d['date']}  ",
+        f"**Centroid:** {d['lat']:.4f}°N, {d['lon']:.4f}°E  ",
+        f"**Affected area (projected CRS):** {d['area_ha']:.1f} ha  ",
+        f"**Severity (ranking):** {d['severity']}  ",
+        f"**Priority score (advisory):** {p['score']}/100",
+        "",
+        "## Factor breakdown",
+    ]
+    lines += [f"- {f['label']}: {f['points']}/{f['max']} — {f['detail']}" for f in p["factors"]]
+    lines += [
+        "",
+        "## Analysis method",
+        "- Baseline: NDVI differencing between Sentinel-2 L2A observations",
+        "- Imagery source: Sentinel-2 (ESA/Copernicus) via Earth Search STAC",
+        f"- Polygon vertices (WGS84): {json.dumps(d['polygon'])}",
+        "",
+        "## Review workflow",
+        f"- Status: {REVIEW_LABELS.get(r['status'], r['status'])}",
+        f"- Notes: {r['notes'] or '(none)'}",
+        f"- Last review update: {r['updated'] or '(none)'}",
+        "",
+        "## Limitations (must read)",
+        "- This report describes **change observed between imagery dates**.",
+        "- A detected change does **not** prove illegal deforestation; legal",
+        "  classification requires field verification and official records.",
+        "- Sample data is clearly labelled; no confidence score is asserted",
+        "  because none is calibrated in this build.",
+    ]
+    text = "\n".join(lines)
+    return Response(
+        content=text,
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{det_id}-evidence-report.md"'},
+    )
+
+
+# -------------------------------------------------------- alerts & panels ---
+
+@app.get("/api/alerts")
+def alerts(severity: str | None = None, unread_only: bool = False):
+    return {"alerts": store.list_alerts(severity=severity, only_unread=unread_only)}
+
+
+@app.post("/api/alerts/{alert_id}/read")
+def alert_read(alert_id: str, read: bool = True):
+    if read and not any(a["id"] == alert_id for a in store.list_alerts()):
+        raise HTTPException(404, f"Alert {alert_id} not found")
+    store.mark_alert_read(alert_id, read)
+    return {"ok": True}
+
+
+@app.get("/api/stats")
+def stats():
+    ds = store.list_detections()
+    return {
+        "monitoredKm2": REGION["monitoredKm2"],
+        "totalDetections": len(ds),
+        "affectedHa": round(sum(d["area_ha"] for d in ds), 1),
+        "newDetections": sum(1 for d in ds if d["date"] >= "2026-10-26"),
+        "highPriority": sum(1 for d in ds if d["severity"] in ("critical", "high")),
+        "weeklyHistory": _cached("weekly"),
+        "monthlyTrend": _cached("monthlyTrend"),
+        "regionStatuses": _cached("regionStatuses"),
+        "activity": _cached("activity"),
+        "investigations": _cached("investigations"),
+        "demoNote": DEMO_NOTE,
+    }
+
+
+def _cached(key: str) -> Any:
+    from seed_data import (
+        SEED_ACTIVITY, SEED_INVESTIGATIONS, SEED_MONTHLY_TREND,
+        SEED_REGION_STATUSES, SEED_WEEKLY_HISTORY,
+    )
+    return {
+        "weekly": SEED_WEEKLY_HISTORY,
+        "monthlyTrend": SEED_MONTHLY_TREND,
+        "regionStatuses": SEED_REGION_STATUSES,
+        "activity": SEED_ACTIVITY,
+        "investigations": SEED_INVESTIGATIONS,
+    }[key]
+
+
+# -------------------------------------------------- geospatial pipeline ---
+
+@app.post("/api/pipeline/run")
+def pipeline_run(p: PipelineRun):
+    """Execute the baseline NDVI-diff pipeline (STAC / Sentinel-2)."""
+    try:
+        from pipeline import run_detection
+        fc = run_detection(
+            (p.minLon, p.minLat, p.maxLon, p.maxLat),
+            p.before_from, p.before_to, p.after_from, p.after_to, p.max_cloud,
         )
     except RuntimeError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    return result
+        raise HTTPException(404, str(e))
+    except Exception as e:  # network/scoped errors → 502 with honest message
+        raise HTTPException(502, f"Pipeline failed: {e}") from e
+
+    if p.import_result and fc.get("features"):
+        _import_features(fc)
+        fc["importedAs"] = "detections"
+    return fc
+
+
+def _import_features(fc: dict[str, Any]) -> list[str]:
+    """Turn pipeline GeoJSON candidates into persisted detections."""
+    created: list[str] = []
+    for feat in fc.get("features", []):
+        props = feat.get("properties", {})
+        geom = feat["geometry"]
+        ring = geom["coordinates"][0]
+        xs = [pt[0] for pt in ring]
+        ys = [pt[1] for pt in ring]
+        lat, lon = (min(ys) + max(ys)) / 2, (min(xs) + max(xs)) / 2
+        area_ha = float(props.get("area_ha", 0.0))
+        det = {
+            "id": store.next_detection_id(),
+            "date": fc["summary"]["observations"]["after"]["datetime"],
+            "region": "Pipeline Import (RENAME ME)",
+            "area_ha": round(area_ha, 2) or 0.01,
+            "lat": round(lat, 4),
+            "lon": round(lon, 4),
+            "severity": "high" if area_ha >= 30 else "medium" if area_ha >= 10 else "low",
+            "status": "new",
+            "evidence": True,
+            "polygon": [[y, x] for x, y in ring],
+            "source": "pipeline-ndvi-diff",
+        }
+        store.insert_detection(det)
+        created.append(det["id"])
+    return created
+
+
+@app.get("/api/pipeline/summary")
+def pipeline_summary():
+    from pipeline import COLLECTION, DEFAULT_MIN_AREA, DEFAULT_NDVI_DROP, STAC_URL
+    return {
+        "pipeline": "baseline-ndvi-difference",
+        "model": "none (classical — labelled BASELINE, no neural network)",
+        "confidence": None,
+        "collection": COLLECTION,
+        "stac": STAC_URL,
+        "thresholds": {"ndvi_drop": DEFAULT_NDVI_DROP, "min_area_m2": DEFAULT_MIN_AREA},
+        "note": DEMO_NOTE,
+    }
+
+
+# Optionally serve the built frontend so the whole app can run as ONE
+# Python process (uvicorn main:app). Falls back silently when absent.
+if DIST_DIR.exists():
+    app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="site")

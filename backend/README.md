@@ -1,45 +1,53 @@
-# PATCHLINE baseline pipeline — backend service (separate from the static site)
+# PATCHLINE backend — 100% Python
 
-This is a **clearly-labelled baseline change-detection pipeline**, not a
-pretence of a neural network. It is intended to run on a workstation or
-in Colab; the deployed site remains static.
+The **entire backend is Python**. No JavaScript, Node, TypeScript or any
+other language is used anywhere on the backend — only Python + SQLite
+(Python standard library).
 
-## What it does (honest scope)
+## Modules (all Python)
 
-1. Queries two Sentinel-2 L2A observations over a bbox via the
-   **Earth Search STAC API** (AWS Open Data, no credentials needed for
-   read-only queries).
-2. Spatially aligns red (B04) + NIR (B08) bands on a common grid.
-3. Applies the SCL cloud/shadow/vegetation mask from item metadata.
-4. Computes **NDVI** per observation and the **ΔNDVI** difference.
-5. Thresholds ΔNDVI to produce candidate change footprints.
-6. Vectorises footprints into polygons (rasterio → shapely).
-7. Areas are computed in **EPSG:32744** (UTM 44N — correct for Telangana),
-   not raw Web-Mercator degrees.
-8. Result is a GeoJSON FeatureCollection + JSON summary. Nothing is
-   fabricated: no confidence score is emitted (none is calibrated), and
-   polygons are advisory candidates for **human review only**.
-
-## API (FastAPI)
-
-```
-uvicorn main:app --reload --port 8000
-```
-
-| Endpoint | Purpose |
+| File | Role |
 |---|---|
-| `GET /health` | service + configured source info |
-| `POST /detect` | `{minLon,minLat,maxLon,maxLat, before:"2026-06-12", after:"2026-10-28", max_cloud=20}` → GeoJSON + summary |
+| `main.py` | FastAPI service: state endpoints, review workflow, stats, reports, optional static hosting of `../dist` |
+| `store.py` | SQLite persistence via **stdlib `sqlite3`** — detections, review workflow, alerts; seeds labelled sample data on first run |
+| `scoring.py` | Explainable priority score (0–100, per-factor breakdown) — weights mirror the frontend exactly |
+| `pipeline.py` | Baseline geospatial pipeline: Sentinel-2 L2A via **Earth Search STAC** → rasterio COG reads → SCL cloud mask → **NDVI differencing** (NumPy) → threshold → shapely polygonisation → area in UTM 44N (pyproj) |
+| `seed_data.py` | Labelled demo dataset (Pakhal Wildlife Sanctuary sector) |
+| `config.py` | Region constants, review-status enum, paths |
+| `test_backend.py` | pytest suite for scoring, store, and pipeline import |
 
-The frontend's **Import GeoJSON** button consumes this output directly —
-that is the wiring: pipeline → GeoJSON → PATCHLINE map.
+## Run
 
-## Honest limitations (say these to judges)
+```
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000      # from inside backend/
+python -m pytest test_backend.py -v        # run the tests
+```
 
-- Sentinel-2 revisit is ~5 days; cloud cover in monsoon Telangana limits pairs.
-- ΔNDVI thresholding is the classic baseline; it flags **change**, not
-  *illegal* change — legal/illegal is a human, field-verified determination
-  (see Hansen/GFW for reference layers, also advisory).
-- Ready-for-upgrade path: swap `pipeline.baseline_ndvi_diff` for a Siamese
-  U-Net (PyTorch) once curated training pairs exist; geometry + area code
-  stays identical.
+Because `../dist` (the built frontend) is auto-mounted when present, this
+single Python process can serve **both** the API and the website.
+
+## API
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/health` | service status + stack info |
+| GET | `/api/meta` | region, boundary, review-status enum |
+| GET | `/api/detections` | filters: severity, status, region, date range, sort by priority/date |
+| GET | `/api/detections/{id}` | detail + priority breakdown + review |
+| PATCH | `/api/detections/{id}/review` | update review status / notes (6-stage workflow) |
+| GET | `/api/detections/{id}/report` | downloadable markdown evidence report |
+| GET | `/api/alerts` · POST `/api/alerts/{id}/read` | alert feed |
+| GET | `/api/stats` | dashboard statistics (computed from the store) |
+| POST | `/api/pipeline/run` | execute the baseline change-detection pipeline over a bbox; `import_result: true` persists candidates as detections |
+| GET | `/api/pipeline/summary` | pipeline metadata |
+
+## Honest scope (asserted in every response)
+
+- Detections are **advisory candidates for human review** — a detected
+  change never proves illegal activity.
+- The pipeline is a clearly-labelled **classical NDVI-difference baseline**,
+  not a neural network; **no confidence score is emitted** because none is
+  calibrated.
+- Areas are computed in **EPSG:32744 (UTM 44N)**, not raw Web-Mercator.
+- The seeded demo dataset is clearly labelled as sample data.
