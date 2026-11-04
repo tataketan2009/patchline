@@ -17,7 +17,6 @@ from seed_data import SEED_DETECTIONS
 
 store.init_db()
 
-
 # ----------------------------------------------------------------- scoring ---
 
 def test_score_bounds_all_seed_detections():
@@ -102,3 +101,66 @@ def test_import_inserts_pipeline_detection():
     assert det["source"] == "pipeline-ndvi-diff"
     assert det["area_ha"] == pytest.approx(6.5)
     assert det["polygon"][0] == [17.80, 79.80]  # lat/lon order swapped correctly
+
+
+# -------------------------------------------------- investigations / alerts ---
+
+def test_investigation_lifecycle():
+    n0 = len(store.list_investigations())
+    inv_id = store.insert_investigation("PL-2026-0841", "T. Demo", "assigned", "high", "Nov 30", 5)
+    assert len(store.list_investigations()) == n0 + 1
+    inv = store.update_investigation(inv_id, {"stage": "investigating", "progress": 40})
+    assert inv["stage"] == "investigating" and inv["progress"] == 40
+    with pytest.raises(ValueError):
+        store.update_investigation(inv_id, {"stage": "bogus"})
+    store.add_activity("investigation", inv_id, "Analyst", "Field photos attached")
+    acts = store.list_activity("investigation", inv_id)
+    assert any("Field photos" in a["text"] for a in acts)
+    store.add_activity("investigation", inv_id, "Analyst", "Closed after verification")
+    store.update_investigation(inv_id, {"stage": "closed", "progress": 100})
+    assert store.get_investigation(inv_id)["stage"] == "closed"
+    linked = store.list_investigations(detection_id="PL-2026-0841")
+    assert any(i["id"] == inv_id for i in linked)
+
+
+def test_alert_dedupe_and_resolve():
+    import uuid
+    ref = f"test:dup-{uuid.uuid4()}"
+    a1, created1 = store.insert_alert("high", "Test dup alert", "Pakhal East", "now", source_ref=ref)
+    a2, created2 = store.insert_alert("high", "Test dup alert", "Pakhal East", "now", source_ref=ref)
+    assert created1 and not created2 and a1 == a2
+    store.mark_alert_resolved(a1)
+    matching = [a for a in store.list_alerts() if a["id"] == a1][0]
+    assert matching["status"] == "resolved" and matching["read"] is True
+
+
+def test_escalation_auto_alert_via_review_endpoint():
+    from fastapi.testclient import TestClient  # may be absent older httpx — guard below
+    try:
+        client = TestClient(__import__("main").app)
+    except Exception:
+        pytest.skip("TestClient unavailable")
+    r = client.patch("/api/detections/PL-2026-0822/review", json={"status": "escalated"})
+    assert r.status_code == 200
+    alerts = [a for a in store.list_alerts() if a.get("source_ref") == "escalation:PL-2026-0822"]
+    assert len(alerts) == 1
+    # re-escalation must NOT duplicate (dedupe by source_ref)
+    client.patch("/api/detections/PL-2026-0822/review", json={"status": "escalated"})
+    assert len([a for a in store.list_alerts() if a.get("source_ref") == "escalation:PL-2026-0822"]) == 1
+
+
+def test_analytics_shape():
+    data = store.analytics()
+    assert data["totalDetections"] >= 9
+    assert set(data["severityDistribution"]) == {"critical", "high", "medium", "low"}
+    assert data["regionAffectedHa"] and data["detectionsByMonth"]
+    assert data["investigationCompletionRate"] is not None
+
+
+def test_csv_export():
+    from main import export_csv
+    resp = export_csv(status="resolved")
+    lines = resp.body.decode().splitlines()
+    assert lines[0].startswith("detection_id,")
+    assert len(lines) >= 2
+

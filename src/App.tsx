@@ -6,29 +6,39 @@ import DashboardView from "./views/DashboardView";
 import DetectionsView from "./views/DetectionsView";
 import AlertsView from "./views/AlertsView";
 import InvestigationsView from "./views/InvestigationsView";
+import AnalyticsView from "./views/AnalyticsView";
 import SettingsView from "./views/SettingsView";
 import DetectionPage from "./views/DetectionPage";
 import { ThemeProvider } from "./lib/theme";
 import { ToastProvider } from "./lib/toast";
 import { DETECTIONS } from "./lib/data";
+import { NAV_ITEMS } from "./components/Sidebar";
 import { initRecurrenceScan } from "./lib/review";
 
 initRecurrenceScan(DETECTIONS);
 
-/** '#/detection/PL-2026-0841' → shareable detection pages without server config. */
-function parseHash(): string | null {
+/** Hash routing: '#/detection/PL-2026-0841' for shareable detection pages,
+ *  '#/view/<name>' for deep-linkable pages — without any server configuration. */
+function parseHash(): { detection: string | null; view: ViewId | null } {
   const m = window.location.hash.match(/^#\/detection\/([\w-]+)/);
-  return m ? m[1] : null;
+  if (m) return { detection: m[1], view: null };
+  const v = window.location.hash.match(/^#\/view\/([\w-]+)/);
+  const id = v ? (NAV_ITEMS.find((n) => n.id === v[1])?.id ?? null) : null;
+  return { detection: null, view: id };
 }
 
 function Shell() {
   const [view, setView] = useState<ViewId>("dashboard");
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(() => parseHash());
+  const [detailId, setDetailId] = useState<string | null>(() => parseHash().detection);
 
   useEffect(() => {
-    const onHash = () => setDetailId(parseHash());
+    const onHash = () => {
+      const { detection, view: v } = parseHash();
+      if (v) setView(v);
+      setDetailId(detection);
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -75,6 +85,7 @@ function Shell() {
               {view === "detections" && <DetectionsView />}
               {view === "alerts" && <AlertsView />}
               {view === "investigations" && <InvestigationsView />}
+              {view === "analytics" && <AnalyticsView />}
               {view === "settings" && <SettingsView />}
             </>
           )}

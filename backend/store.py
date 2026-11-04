@@ -15,15 +15,64 @@ from config import DB_PATH, REVIEW_STATUSES
 from seed_data import (
     SEED_ALERTS,
     SEED_DETECTIONS,
+    SEED_INVESTIGATIONS,
 )
 
 _lock = threading.Lock()
+
+INVESTIGATION_STAGES = (
+    "new",
+    "assigned",
+    "investigating",
+    "pending-verification",
+    "resolved",
+    "closed",
+)
+
+PRIORITIES = ("low", "medium", "high", "critical")
 
 
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Additive, idempotent schema migrations (safe on existing DBs)."""
+    for stmt in (
+        "ALTER TABLE alerts ADD COLUMN status TEXT NOT NULL DEFAULT 'open'",
+        "ALTER TABLE alerts ADD COLUMN source_ref TEXT",
+        "ALTER TABLE alerts ADD COLUMN detection_id TEXT",
+        """
+        CREATE TABLE IF NOT EXISTS investigations (
+            id           TEXT PRIMARY KEY,
+            detection_id TEXT NOT NULL REFERENCES detections(id),
+            officer      TEXT NOT NULL DEFAULT 'Unassigned',
+            stage        TEXT NOT NULL CHECK (stage IN ('new','assigned','investigating','pending-verification','resolved','closed')),
+            priority     TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low','medium','high','critical')),
+            due          TEXT NOT NULL DEFAULT '',
+            progress     INTEGER NOT NULL DEFAULT 0,
+            created      TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS activity_log (
+            ts        TEXT NOT NULL DEFAULT (datetime('now')),
+            ref_type  TEXT NOT NULL,               -- 'detection' | 'investigation'
+            ref_id    TEXT NOT NULL,
+            actor     TEXT NOT NULL,
+            text      TEXT NOT NULL
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_det_region ON detections(region)",
+        "CREATE INDEX IF NOT EXISTS idx_det_date ON detections(date)",
+        "CREATE INDEX IF NOT EXISTS idx_inv_det ON investigations(detection_id)",
+    ):
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass  # column/index already exists
 
 
 def init_db() -> None:
@@ -63,6 +112,8 @@ def init_db() -> None:
             """
         )
 
+        _migrate(conn)
+
         if not conn.execute("SELECT 1 FROM detections LIMIT 1").fetchone():
             cols = "id, date, region, area_ha, lat, lon, severity, status, evidence, polygon, source"
             for d in SEED_DETECTIONS:
@@ -80,6 +131,22 @@ def init_db() -> None:
                 conn.execute(
                     "INSERT INTO alerts VALUES (?,?,?,?,?,?)",
                     (a["id"], a["severity"], a["title"], a["region"], a["time"], int(a["read"])),
+                )
+
+        if not conn.execute("SELECT 1 FROM investigations LIMIT 1").fetchone():
+            # Demo seed mapped to the canonical stage vocabulary.
+            stage_map = {"triage": "new", "field-verification": "investigating",
+                         "evidence-review": "investigating", "enforcement": "pending-verification"}
+            for inv in SEED_INVESTIGATIONS:
+                conn.execute(
+                    "INSERT INTO investigations (id, detection_id, officer, stage, priority, due, progress)"
+                    " VALUES (?,?,?,?,?,?,?)",
+                    (inv["id"], inv["detectionId"], inv["officer"], stage_map.get(inv["stage"], "new"),
+                     "high" if inv["progress"] >= 70 else "medium", inv["due"], inv["progress"]),
+                )
+                conn.execute(
+                    "INSERT INTO activity_log (ref_type, ref_id, actor, text) VALUES ('investigation', ?, 'System', ?)",
+                    (inv["id"], f"Investigation {inv['id']} seeded from demo data (stage: {inv['stage']})."),
                 )
 
 
@@ -202,3 +269,157 @@ def mark_alert_read(alert_id: str, read: bool) -> None:
 def json_loads(s: str) -> Any:
     import json
     return json.loads(s)
+
+
+# ------------------------------------------------------------- investigations ---
+
+INV_STAGE_MAP = {"triage": "new", "field-verification": "investigating",
+                 "evidence-review": "investigating", "enforcement": "pending-verification"}
+
+
+def list_investigations(detection_id: str | None = None, stage: str | None = None) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM investigations WHERE 1=1"
+    params: list[Any] = []
+    if detection_id:
+        sql += " AND detection_id = ?"
+        params.append(detection_id)
+    if stage:
+        sql += " AND stage = ?"
+        params.append(stage)
+    with _connect() as conn:
+        rows = [dict(r) for r in conn.execute(sql + " ORDER BY id DESC", params)]
+    return rows
+
+
+def get_investigation(inv_id: str) -> dict[str, Any] | None:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM investigations WHERE id = ?", (inv_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def next_investigation_id() -> str:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM investigations WHERE id LIKE 'INV-%' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    seq = int(row["id"].split("-")[1]) if row else 100
+    return f"INV-{seq + 1:03d}"
+
+
+def insert_investigation(detection_id: str, officer: str, stage: str,
+                         priority: str, due: str, progress: int) -> str:
+    inv_id = next_investigation_id()
+    with _lock, _connect() as conn:
+        conn.execute(
+            "INSERT INTO investigations (id, detection_id, officer, stage, priority, due, progress)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (inv_id, detection_id, officer, stage, priority, due, progress),
+        )
+        conn.execute(
+            "INSERT INTO activity_log (ref_type, ref_id, actor, text) VALUES ('investigation', ?, 'System', ?)",
+            (inv_id, f"Investigation opened for detection {detection_id}"),
+        )
+    return inv_id
+
+
+def update_investigation(inv_id: str, patch: dict[str, Any], actor: str = "Analyst") -> dict[str, Any]:
+    allowed = {"officer", "stage", "priority", "due", "progress"}
+    sets, params, texts = [], [], []
+    for k, v in patch.items():
+        if k not in allowed or v is None:
+            continue
+        if k == "stage" and v not in INVESTIGATION_STAGES:
+            raise ValueError(f"Unknown investigation stage: {v}")
+        sets.append(f"{k} = ?")
+        params.append(v)
+        texts.append(f"{k} set to {v}")
+    if sets:
+        with _lock, _connect() as conn:
+            conn.execute(f"UPDATE investigations SET {', '.join(sets)} WHERE id = ?", (*params, inv_id))
+            if texts:
+                conn.execute(
+                    "INSERT INTO activity_log (ref_type, ref_id, actor, text) VALUES ('investigation', ?, ?, ?)",
+                    (inv_id, actor, "; ".join(texts)),
+                )
+    return get_investigation(inv_id)
+
+
+# ------------------------------------------------------------------- alerts ---
+
+def next_alert_id() -> str:
+    with _connect() as conn:
+        row = conn.execute("SELECT id FROM alerts WHERE id LIKE 'AL-%' ORDER BY id DESC LIMIT 1").fetchone()
+    seq = int(row["id"].split("-")[1]) if row else 400
+    return f"AL-{seq + 1:03d}"
+
+
+def insert_alert(severity: str, title: str, region: str, time: str,
+                 source_ref: str | None = None, detection_id: str | None = None) -> tuple[str, bool]:
+    """Create an alert; dedupes on source_ref so one processing event never
+    produces repeat alerts. Returns (id, created)."""
+    if source_ref:
+        with _connect() as conn:
+            row = conn.execute("SELECT id FROM alerts WHERE source_ref = ?", (source_ref,)).fetchone()
+        if row:
+            return row["id"], False
+    alert_id = next_alert_id()
+    with _lock, _connect() as conn:
+        conn.execute(
+            """INSERT INTO alerts (id, severity, title, region, time, read, status, source_ref, detection_id)
+               VALUES (?,?,?,?,?,0,'open',?,?)""",
+            (alert_id, severity, title, region, time, source_ref, detection_id),
+        )
+    return alert_id, True
+
+
+def mark_alert_resolved(alert_id: str) -> None:
+    with _lock, _connect() as conn:
+        conn.execute("UPDATE alerts SET status = 'resolved', read = 1 WHERE id = ?", (alert_id,))
+
+
+# ------------------------------------------------------------------ activity --
+
+def add_activity(ref_type: str, ref_id: str, actor: str, text: str) -> None:
+    with _lock, _connect() as conn:
+        conn.execute(
+            "INSERT INTO activity_log (ref_type, ref_id, actor, text) VALUES (?,?,?,?)",
+            (ref_type, ref_id, actor, text),
+        )
+
+
+def list_activity(ref_type: str, ref_id: str) -> list[dict[str, Any]]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT ts, ref_type, ref_id, actor, text FROM activity_log"
+            " WHERE ref_type = ? AND ref_id = ? ORDER BY ts DESC",
+            (ref_type, ref_id),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ----------------------------------------------------------------- analytics --
+
+def analytics() -> dict[str, Any]:
+    ds = list_detections()
+    invs = list_investigations()
+    by_sev: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    by_region: dict[str, float] = {}
+    by_month: dict[str, int] = {}
+    by_block: dict[str, int] = {}
+    for d in ds:
+        by_sev[d["severity"]] += 1
+        by_region[d["region"]] = round(by_region.get(d["region"], 0.0) + d["area_ha"], 1)
+        by_month[d["date"][:7]] = by_month.get(d["date"][:7], 0) + 1
+        blk = d["region"].split(" ")[0]
+        by_block[blk] = by_block.get(blk, 0) + 1
+    resolved_inv = sum(1 for i in invs if i["stage"] in ("resolved", "closed"))
+    return {
+        "totalDetections": len(ds),
+        "totalAffectedHa": round(sum(d["area_ha"] for d in ds), 1),
+        "severityDistribution": by_sev,
+        "regionAffectedHa": [{"region": k, "area_ha": v} for k, v in sorted(by_region.items(), key=lambda x: -x[1])],
+        "detectionsByMonth": [{"month": k, "count": v} for k, v in sorted(by_month.items())],
+        "detectionsByBlock": [{"block": k, "count": v} for k, v in sorted(by_block.items(), key=lambda x: -x[1])],
+        "investigationCompletionRate": round(100 * resolved_inv / len(invs), 1) if invs else None,
+        "totalInvestigations": len(invs),
+    }

@@ -1,20 +1,26 @@
 import { useMemo, useState } from "react";
 import {
   ArrowLeft,
+  ClipboardPlus,
   Copy,
   Download,
   FileSearch,
   Layers,
   MapPin,
+  Printer,
   Save,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import {
-  DETECTIONS,
-  SEVERITY_COLOR,
-} from "../lib/data";
+import { DETECTIONS, SEVERITY_COLOR } from "../lib/data";
 import ImageryCompare, { seedFromId } from "../lib/imagery";
-import { downloadEvidenceReport } from "../lib/report";
+import { downloadEvidenceReport, printEvidenceReport } from "../lib/report";
+import {
+  INV_STAGE_LABEL,
+  createInvestigation,
+  investigationsFor,
+  type InvStage,
+} from "../lib/investigations";
+import { ALERTS } from "../lib/data";
 import { REVIEW_LABEL, REVIEW_STYLE, getReview, priorityScore, setReview, type ReviewStatus } from "../lib/review";
 import { useToast } from "../lib/toast";
 import { SeverityBadge } from "../components/ui";
@@ -80,6 +86,28 @@ export default function DetectionPage({ id, onBack }: { id: string; onBack: () =
 
   const { score, factors } = priorityScore(detection);
   const scoreTier = score >= 70 ? "text-danger" : score >= 45 ? "text-warn" : "text-accent";
+
+  const invList = investigationsFor(detection.id);
+  const relatedAlerts = ALERTS.filter(
+    (a) => a.region.split(" ")[0] === detection.region.split(" ")[0],
+  );
+
+  const openInvestigation = () => {
+    const inv = createInvestigation({ detectionId: detection.id });
+    toast.push("success", `${inv.id} created`, `Investigation opened for ${detection.id}; manage it on the Investigations page.`);
+    forceRerender();
+  };
+
+  const forceRerender = () => setReviewState({ ...getReview(id) }); // re-render trigger that doesn't clobber review state
+
+  const INV_STAGE_CLASS: Record<InvStage, string> = {
+    new: "text-warn bg-warn-soft",
+    assigned: "text-accent bg-accent-soft",
+    investigating: "text-accent bg-accent-soft",
+    "pending-verification": "text-warn bg-warn-soft",
+    resolved: "text-muted bg-muted/10",
+    closed: "text-muted bg-muted/10",
+  };
 
   const saveNotes = () => {
     setReview(id, { notes });
@@ -181,10 +209,20 @@ export default function DetectionPage({ id, onBack }: { id: string; onBack: () =
                 <Save size={13} aria-hidden /> Save note
               </button>
               <button
-                onClick={() => downloadEvidenceReport(detection)}
+                onClick={() => {
+                  downloadEvidenceReport(detection);
+                  toast.push("info", "Report downloading", `${detection.id} evidence report saved as HTML.`);
+                }}
                 className="inline-flex items-center gap-1.5 rounded-md border border-line-strong px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-raised"
               >
                 <Download size={13} aria-hidden /> Evidence report
+              </button>
+              <button
+                onClick={() => printEvidenceReport(detection)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-line-strong px-3 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-raised"
+                title="Opens the print dialog — choose 'Save as PDF'"
+              >
+                <Printer size={13} aria-hidden /> PDF
               </button>
               {review.updated && (
                 <span className="font-mono text-[10px] text-muted">last review {review.updated}</span>
@@ -243,7 +281,54 @@ export default function DetectionPage({ id, onBack }: { id: string; onBack: () =
                 </option>
               ))}
             </select>
+
+            <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Linked investigations
+            </h3>
+            {invList.length === 0 ? (
+              <button
+                onClick={openInvestigation}
+                className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-line-strong px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-raised"
+              >
+                <ClipboardPlus size={12} aria-hidden /> Open investigation
+              </button>
+            ) : (
+              <ul className="mt-1.5 space-y-1">
+                {invList.map((inv) => (
+                  <li key={inv.id} className="flex items-center gap-2 rounded-md border border-line bg-canvas px-2.5 py-1.5">
+                    <span className="font-mono text-[12px] text-ink">{inv.id}</span>
+                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${INV_STAGE_CLASS[inv.stage]}`}>
+                      {INV_STAGE_LABEL[inv.stage]}
+                    </span>
+                    <button
+                      onClick={() => {
+                        window.location.hash = "#/view/investigations";
+                        onBack();
+                      }}
+                      className="ml-auto text-[11px] font-medium text-accent hover:underline"
+                    >
+                      Manage ↗
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
+
+          {relatedAlerts.length > 0 && (
+            <section className="rounded-lg border border-line bg-panel p-4">
+              <h2 className="text-[13px] font-semibold text-ink">Associated alerts</h2>
+              <ul className="mt-1.5 space-y-1">
+                {relatedAlerts.map((a) => (
+                  <li key={a.id} className="flex items-center gap-2 text-[12px]">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: SEVERITY_COLOR[a.severity] }} aria-hidden />
+                    <span className="min-w-0 flex-1 truncate text-ink">{a.title}</span>
+                    <span className="font-mono text-[10px] text-muted">{a.id}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           <section className="rounded-lg border border-line bg-panel p-4">
             <h2 className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">

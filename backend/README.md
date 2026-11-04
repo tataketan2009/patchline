@@ -35,11 +35,17 @@ single Python process can serve **both** the API and the website.
 | GET | `/api/meta` | region, boundary, review-status enum |
 | GET | `/api/detections` | filters: severity, status, region, date range, sort by priority/date |
 | GET | `/api/detections/{id}` | detail + priority breakdown + review |
-| PATCH | `/api/detections/{id}/review` | update review status / notes (6-stage workflow) |
+| PATCH | `/api/detections/{id}/review` | update review status / notes (6-stage workflow); auto-alert on escalate |
 | GET | `/api/detections/{id}/report` | downloadable markdown evidence report |
-| GET | `/api/alerts` · POST `/api/alerts/{id}/read` | alert feed |
+| GET | `/api/detections/{id}/activity` | detection activity trail |
+| GET | `/api/investigations` · POST `/api/investigations` | list (filter by detection/stage) / open an investigation |
+| PATCH | `/api/investigations/{id}` · POST `…/notes` · GET `…/activity` | officer workflow: stage, officer, priority, due, progress, notes, trail |
+| GET | `/api/alerts` · POST `/api/alerts` | alert feed / create with `source_ref` **dedupe** |
+| POST | `/api/alerts/{id}/read` · PATCH `…/resolve` | acknowledge / resolve |
 | GET | `/api/stats` | dashboard statistics (computed from the store) |
-| POST | `/api/pipeline/run` | execute the baseline change-detection pipeline over a bbox; `import_result: true` persists candidates as detections |
+| GET | `/api/analytics` | severity/region/month distributions, completion rate |
+| GET | `/api/export/detections.csv` | CSV export (filterable) |
+| POST | `/api/pipeline/run` | execute the baseline change-detection pipeline over a bbox; `import_result: true` persists candidates **and auto-raises deduped alerts** |
 | GET | `/api/pipeline/summary` | pipeline metadata |
 
 ## Honest scope (asserted in every response)

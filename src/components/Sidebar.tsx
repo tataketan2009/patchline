@@ -1,4 +1,5 @@
 import {
+  ChartColumnBig,
   ClipboardList,
   Layers,
   LayoutDashboard,
@@ -10,13 +11,14 @@ import {
 } from "lucide-react";
 import { DEMO_LABEL, useTheme } from "../lib/theme";
 
-export type ViewId = "dashboard" | "detections" | "alerts" | "investigations" | "settings";
+export type ViewId = "dashboard" | "detections" | "alerts" | "investigations" | "analytics" | "settings";
 
 export const NAV_ITEMS: { id: ViewId; label: string; icon: typeof LayoutDashboard; badge?: number }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "detections", label: "Detections", icon: Radar },
-  { id: "alerts", label: "Alerts", icon: TriangleAlert, badge: 3 },
+  { id: "alerts", label: "Alerts", icon: TriangleAlert },
   { id: "investigations", label: "Investigations", icon: ClipboardList },
+  { id: "analytics", label: "Analytics", icon: ChartColumnBig },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 

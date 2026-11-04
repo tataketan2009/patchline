@@ -1,19 +1,19 @@
 import { useMemo, useState } from "react";
-import { Archive, BellOff, Search, TriangleAlert } from "lucide-react";
+import { Archive, CheckCheck, Search, TriangleAlert } from "lucide-react";
 import { ALERTS, DETECTIONS, SEVERITY_COLOR, type Alert, type Severity } from "../lib/data";
 import { GhostButton, PrimaryButton } from "../components/ui";
 import { useToast } from "../lib/toast";
+import { acknowledge, alertState, resolveAlert, unreadIds } from "../lib/alertsState";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low"];
 
 export default function AlertsView() {
   const toast = useToast();
-  const [read, setRead] = useState<Set<string>>(
-    () => new Set(ALERTS.filter((a) => a.read).map((a) => a.id)),
-  );
+  const [state, setState] = useState(() => alertState());
   const [sev, setSev] = useState<Set<Severity>>(() => new Set(SEVERITIES));
   const [region, setRegion] = useState("all");
   const [query, setQuery] = useState("");
+  const [show, setShow] = useState<"open" | "all">("open");
 
   const regions = useMemo(() => Array.from(new Set(ALERTS.map((a) => a.region.split(" ")[0]))).sort(), []);
 
@@ -22,16 +22,16 @@ export default function AlertsView() {
       ALERTS.filter((a) => {
         if (!sev.has(a.severity)) return false;
         if (region !== "all" && !a.region.startsWith(region)) return false;
+        if (show === "open" && (state.ack[a.id] || state.resolved[a.id])) return false;
         const q = query.trim().toLowerCase();
         if (q && !a.title.toLowerCase().includes(q) && !a.region.toLowerCase().includes(q) && !a.id.toLowerCase().includes(q)) return false;
         return true;
       }),
-    [sev, region, query],
+    [sev, region, query, state, show],
   );
 
-  const isRead = (a: Alert) => read.has(a.id);
+  const unread = useMemo(() => unreadIds(), [state]);
 
-  /** Related detections share the same block token as the alert region. */
   const relatedDetection = (a: Alert) => {
     const block = a.region.split(" ")[0];
     return DETECTIONS.find((d) => d.region.startsWith(block)) ?? null;
@@ -44,6 +44,8 @@ export default function AlertsView() {
       else next.add(s);
       return next;
     });
+
+  const dirty = () => setState({ ...alertState() });
 
   return (
     <section className="space-y-3">
@@ -96,36 +98,54 @@ export default function AlertsView() {
         </div>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[12px] text-muted">
-          <span className="font-mono text-ink">{rows.filter((a) => !isRead(a)).length}</span> unread of{" "}
+          <span className="font-mono text-ink">{unread.length}</span> unread of{" "}
           <span className="font-mono text-ink">{rows.length}</span> shown
+          {show === "all" && " (history mode)"}
         </p>
-        <PrimaryButton
-          onClick={() => {
-            setRead(new Set(ALERTS.map((a) => a.id)));
-            toast.push("info", "All alerts marked read");
-          }}
-        >
-          <Archive size={13} aria-hidden />
-          Mark all read
-        </PrimaryButton>
+        <div className="flex items-center gap-2">
+          {(["open", "all"] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setShow(mode)}
+              aria-pressed={show === mode}
+              className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                show === mode ? "border-accent bg-accent-soft text-accent" : "border-line-strong text-muted hover:text-ink"
+              }`}
+            >
+              {mode === "open" ? "Open" : "History"}
+            </button>
+          ))}
+          <PrimaryButton
+            onClick={() => {
+              for (const a of rows) acknowledge(a.id);
+              dirty();
+              toast.push("info", "All shown alerts acknowledged", "Acknowledgement persists in this session (mirrored by the API).");
+            }}
+          >
+            <CheckCheck size={13} aria-hidden />
+            Acknowledge all
+          </PrimaryButton>
+        </div>
       </div>
 
       <ul className="space-y-2" aria-label="Priority alerts">
         {rows.map((a) => {
           const rel = relatedDetection(a);
+          const isAck = state.ack[a.id];
+          const isResolved = state.resolved[a.id];
           return (
             <li
               key={a.id}
-              className="relative overflow-hidden rounded-lg border border-line bg-panel transition-colors hover:border-line-strong"
+              className={`relative overflow-hidden rounded-lg border border-line bg-panel transition-colors hover:border-line-strong ${isResolved ? "opacity-60" : ""}`}
             >
               <span
                 className="absolute inset-y-0 left-0 w-[3px]"
                 style={{ backgroundColor: SEVERITY_COLOR[a.severity] }}
                 aria-hidden
               />
-              <div className="flex items-start gap-3 px-4 py-3.5 pl-5">
+              <div className="flex flex-wrap items-start gap-3 px-4 py-3.5 pl-5">
                 <TriangleAlert
                   size={16}
                   className="mt-0.5 shrink-0"
@@ -133,14 +153,19 @@ export default function AlertsView() {
                   aria-hidden
                 />
                 <div className="min-w-0 flex-1">
-                  <p className={`text-[13px] leading-snug ${isRead(a) ? "text-muted" : "font-medium text-ink"}`}>
+                  <p className={`text-[13px] leading-snug ${isAck ? "text-muted" : "font-medium text-ink"}`}>
                     {a.title}
+                    {isResolved && (
+                      <span className="ml-2 rounded-full bg-muted/10 px-1.5 py-0.5 text-[10px] font-medium text-muted">
+                        resolved
+                      </span>
+                    )}
                   </p>
                   <p className="mt-0.5 font-mono text-[11px] text-muted">
                     {a.id} · {a.region} · {a.time}
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
                   {rel && (
                     <GhostButton
                       className="!py-1"
@@ -151,16 +176,30 @@ export default function AlertsView() {
                       Open {rel.id}
                     </GhostButton>
                   )}
-                  {!isRead(a) && (
+                  {!isAck && (
                     <GhostButton
                       className="!py-1"
                       onClick={() => {
-                        setRead((r) => new Set(r).add(a.id));
+                        acknowledge(a.id);
+                        dirty();
                         toast.push("info", "Alert acknowledged", `${a.id} moved to archive.`);
                       }}
                     >
-                      <BellOff size={13} aria-hidden />
+                      <Archive size={13} aria-hidden />
                       Acknowledge
+                    </GhostButton>
+                  )}
+                  {!isResolved && (
+                    <GhostButton
+                      className="!py-1"
+                      onClick={() => {
+                        resolveAlert(a.id);
+                        dirty();
+                        toast.push("success", "Alert resolved", `${a.id} closed — no further action needed.`);
+                      }}
+                    >
+                      <CheckCheck size={13} aria-hidden />
+                      Resolve
                     </GhostButton>
                   )}
                 </div>
@@ -170,7 +209,7 @@ export default function AlertsView() {
         })}
         {rows.length === 0 && (
           <li className="rounded-lg border border-line bg-panel px-4 py-10 text-center text-[13px] text-muted">
-            No alerts match the current filters.
+            {show === "open" && rows.length === 0 ? "No open alerts — queue is clear." : "No alerts match the current filters."}
           </li>
         )}
       </ul>

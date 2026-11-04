@@ -4,12 +4,14 @@ import {
   ArrowUpRight,
   ChevronRight as Chevron,
   Clock,
+  Cpu,
   Database,
   FileText,
   Globe2,
   Leaf,
   RefreshCw,
   Radar,
+  Satellite,
   ShieldAlert,
   TriangleAlert,
   TrendingDown,
@@ -384,6 +386,35 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: ViewId) 
                 ))}
               </ul>
             )}
+          </Panel>
+
+          <Panel title="System status" meta={<span className="font-mono text-[10px] text-muted">demo</span>}>
+            <ul className="divide-y divide-line text-[12px]">
+              <li className="flex items-center gap-2.5 px-4 py-2.5">
+                <Satellite size={13} className="shrink-0 text-accent" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-ink">Sentinel-2 imagery sync</span>
+                  <span className="block font-mono text-[10px] text-muted">L2A · last ingest 2026-11-02 07:12 UTC</span>
+                </span>
+                <span className="rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">synced</span>
+              </li>
+              <li className="flex items-center gap-2.5 px-4 py-2.5">
+                <Cpu size={13} className="shrink-0 text-accent" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-ink">Change-detection model</span>
+                  <span className="block font-mono text-[10px] text-muted">baseline NDVI-diff v0 · no calibrated confidence</span>
+                </span>
+                <span className="rounded-full bg-warn-soft px-1.5 py-0.5 text-[10px] font-medium text-warn">baseline</span>
+              </li>
+              <li className="flex items-center gap-2.5 px-4 py-2.5">
+                <Database size={13} className="shrink-0 text-accent" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-ink">Detection store</span>
+                  <span className="block font-mono text-[10px] text-muted">SQLite (backend) · mirrored locally in demo</span>
+                </span>
+                <span className="rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">ok</span>
+              </li>
+            </ul>
           </Panel>
 
           <Panel title="Recent detections" meta={<span className="font-mono text-[10px] text-muted">48 h</span>} action={<button onClick={() => onNavigate("detections")} className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-medium text-accent hover:bg-accent-soft">All<Chevron size={12} /></button>}>

@@ -4,7 +4,7 @@ import type { Detection } from "./data";
  * Builds a self-contained HTML evidence report for one detection.
  * No backend required — safe for demo environments.
  */
-export function downloadEvidenceReport(d: Detection) {
+function evidenceHtml(d: Detection): string {
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -54,7 +54,12 @@ PATCHLINE — Forest Intelligence Platform · Synthetic demo dataset for interfa
 </div>
 </body>
 </html>`;
+  return html;
+}
 
+/** HTML evidence report as an instant download. */
+export function downloadEvidenceReport(d: Detection) {
+  const html = evidenceHtml(d);
   const blob = new Blob([html], { type: "text/html" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -66,3 +71,49 @@ PATCHLINE — Forest Intelligence Platform · Synthetic demo dataset for interfa
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+/** PDF export: opens the evidence report and triggers the browser print
+ *  dialog ("Save as PDF"). No dependency needed; honest and universal. */
+export function printEvidenceReport(d: Detection) {
+  const html = evidenceHtml(d);
+  const w = window.open("", "_blank", "width=720,height=880");
+  if (!w) {
+    // Popup blocked — fall back to the HTML download.
+    downloadEvidenceReport(d);
+    return;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  window.setTimeout(() => {
+    try {
+      w.print();
+    } catch {
+      /* some engines require manual Ctrl+P; document is already open */
+    }
+  }, 250);
+}
+
+/** CSV export (Excel/GIS-friendly). Backend mirror: GET /api/export/detections.csv */
+export function downloadDetectionsCsv(rows: Detection[]) {
+  const esc = (v: string | number | boolean) => {
+    const s = String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = ["detection_id", "date", "region", "area_ha", "lat", "lon", "severity", "status", "evidence"];
+  const lines = rows.map((d) =>
+    [d.id, d.date, d.region, d.areaHa.toFixed(2), d.lat, d.lon, d.severity, d.status, d.evidence].map(esc).join(","),
+  );
+  const csv = [header.join(","), ...lines].join("\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "patchline-detections.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+

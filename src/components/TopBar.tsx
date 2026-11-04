@@ -10,6 +10,7 @@ const PAGE_TITLES: Record<ViewId, string> = {
   detections: "Detections",
   alerts: "Priority alerts",
   investigations: "Investigations",
+  analytics: "Analytics",
   settings: "Settings",
 };
 
