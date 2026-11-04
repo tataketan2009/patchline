@@ -1,4 +1,7 @@
-# Render.com deployment config for PATCHLINE (static site)
+# Render.com deployment config for PATCHLINE
+# Two services, both served from this repo:
+#   1. patchline       — static frontend site
+#   2. patchline-api   — the entire backend, 100% Python (FastAPI + SQLite)
 # Docs: https://render.com/docs/deploy-static-site
 services:
   - type: web
@@ -19,3 +22,15 @@ services:
       - path: /*
         name: X-Content-Type-Options
         value: nosniff
+
+  - type: web
+    name: patchline-api
+    runtime: python
+    autoDeploy: true
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
