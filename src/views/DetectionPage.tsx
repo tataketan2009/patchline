@@ -13,7 +13,7 @@ import {
   DETECTIONS,
   SEVERITY_COLOR,
 } from "../lib/data";
-import ImageryCompare from "../lib/imagery";
+import ImageryCompare, { seedFromId } from "../lib/imagery";
 import { downloadEvidenceReport } from "../lib/report";
 import { REVIEW_LABEL, REVIEW_STYLE, getReview, priorityScore, setReview, type ReviewStatus } from "../lib/review";
 import { useToast } from "../lib/toast";
@@ -161,7 +161,7 @@ export default function DetectionPage({ id, onBack }: { id: string; onBack: () =
           <section className="rounded-lg border border-line bg-panel p-4">
             <h2 className="text-[13px] font-semibold text-ink">Before / after imagery</h2>
             <div className="mt-2">
-              <ImageryCompare size={size()} />
+              <ImageryCompare size={size()} seed={seedFromId(detection.id)} />
             </div>
           </section>
 
