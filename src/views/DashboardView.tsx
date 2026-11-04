@@ -133,9 +133,9 @@ function HistoryBars() {
   const max = Math.max(...WEEKLY_HISTORY.map((w) => w.count));
   return (
     <div>
-      <div className="flex h-24 items-end gap-1">
+      <div className="flex h-24 gap-1">
         {WEEKLY_HISTORY.map((w) => (
-          <div key={w.label} className="group flex flex-1 flex-col items-center justify-end gap-1">
+          <div key={w.label} className="group flex h-full flex-1 flex-col items-center justify-end gap-1">
             <span className="font-mono text-[9px] text-muted opacity-0 transition-opacity group-hover:opacity-100">
               {w.count}
             </span>
