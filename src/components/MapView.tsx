@@ -115,7 +115,7 @@ export function DetectionPanel({
       exit={{ opacity: 0, x: 14 }}
       transition={{ duration: 0.16, ease: "easeOut" }}
       aria-label={`Detection ${detection.id}`}
-      className="glass pointer-events-auto absolute top-3 bottom-3 right-3 z-[900] flex w-[calc(100%-1.5rem)] flex-col overflow-y-auto rounded-lg p-4 sm:w-[22.5rem]"
+      className="glass pointer-events-auto absolute inset-x-3 top-3 bottom-3 z-[900] flex flex-col overflow-y-auto rounded-lg p-4 sm:inset-x-auto sm:right-3 sm:w-[22.5rem]"
     >
       <div className="flex items-start justify-between gap-2">
         <div>
@@ -426,7 +426,8 @@ export default function MapView({
         />
 
         {/* Detection polygons */}
-        {visible.map((d) => {          const isSel = d.id === selectedId;
+        {visible.map((d) => {
+          const isSel = d.id === selectedId;
           return (
             <Polygon
               key={d.id}
@@ -560,18 +561,21 @@ export default function MapView({
           </div>
         </div>
 
+        {/* Detection info panel — mounted directly on the map area, so on
+            phones its width tracks the map rather than the zoom controls. */}
+        {selected && (
+          <AnimatePresence>
+            <DetectionPanel
+              detection={selected}
+              onClose={() => onSelect(null)}
+              onResolve={onResolve}
+              onEscalate={onEscalate}
+            />
+          </AnimatePresence>
+        )}
+
         {/* Zoom + recenter, right edge */}
-        <div className="pointer-events-auto absolute top-3 right-3 z-[800] flex flex-col items-end gap-2">
-          {selected && (
-            <AnimatePresence>
-              <DetectionPanel
-                detection={selected}
-                onClose={() => onSelect(null)}
-                onResolve={onResolve}
-                onEscalate={onEscalate}
-              />
-            </AnimatePresence>
-          )}
+        <div className="pointer-events-auto absolute top-3 right-3 z-[810] flex flex-col items-end gap-2">
           {!selected && (
             <div className="glass flex flex-col overflow-hidden rounded-md">
               <button
