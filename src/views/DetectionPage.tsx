@@ -127,7 +127,7 @@ export default function DetectionPage({ id, onBack }: { id: string; onBack: () =
         <span className="ml-auto font-mono text-[10px] text-muted">SAMPLE DATA — synthetic detection</span>
       </div>
 
-      <div className="grid grid-cols-12 gap-3">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
         {/* Left column — fields, imagery, notes */}
         <div className="space-y-3 lg:col-span-7">
           <section className="rounded-lg border border-line bg-panel p-4">
