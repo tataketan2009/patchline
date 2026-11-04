@@ -23,10 +23,12 @@ import {
   INVESTIGATIONS,
   MONTHLY_TREND,
   REGION,
+  REGION_STATUSES,
   SEVERITY_COLOR,
   STATS,
   WEEKLY_HISTORY,
   type Detection,
+  type Severity,
 } from "../lib/data";
 import MapView from "../components/MapView";
 import DetectionDetail from "../components/DetectionDetail";
@@ -235,6 +237,47 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: ViewId) 
   const recent = DETECTIONS.slice(0, 4);
   const activeAlerts = ALERTS.filter((a) => !a.read).slice(0, 3);
 
+  /** Per-region rollup computed from the labelled sample dataset. Groups share
+   *  the same key as the Analytics page and Detections region filter; coverage /
+   *  sensor lines come from the demo REGION_STATUSES set where they exist. */
+  const regionRollups: {
+    name: string;
+    status: string;
+    coverage: number;
+    sensorsOnline: string;
+    detections: number;
+    affectedHa: number;
+    worst: Severity | null;
+  }[] = (() => {
+    const SEV_RANK: Record<Severity, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+    // "Pakhal East · Lakeshore" → "Pakhal East"; single-word regions map to themselves.
+    const blockKey = (region: string) =>
+      region.startsWith("Pakhal ") ? region.split(" ").slice(0, 2).join(" ") : region.split(" ")[0];
+    const roll = new Map<string, { detections: number; affectedHa: number; worst: Severity | null }>();
+    for (const d of DETECTIONS) {
+      const key = blockKey(d.region);
+      const cur = roll.get(key) ?? { detections: 0, affectedHa: 0, worst: null };
+      cur.detections += 1;
+      cur.affectedHa += d.areaHa;
+      if (!cur.worst || SEV_RANK[d.severity] > SEV_RANK[cur.worst]) cur.worst = d.severity;
+      roll.set(key, cur);
+    }
+    return Array.from(roll.entries())
+      .map(([name, v]) => {
+        const rs = REGION_STATUSES.find((r) => r.name === name);
+        return {
+          name,
+          status: rs?.status ?? "nominal",
+          coverage: rs?.coverage ?? 100,
+          sensorsOnline: rs?.sensorsOnline ?? "covered every pass",
+          worst: v.worst,
+          detections: v.detections,
+          affectedHa: Math.round(v.affectedHa * 10) / 10,
+        };
+      })
+      .sort((a, b) => b.affectedHa - a.affectedHa);
+  })();
+
   return (
     <div className="space-y-3">
       {/* Row 1 — overview */}
@@ -331,8 +374,8 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: ViewId) 
 
       {/* Row 3 — map + side information */}
       <div className="grid grid-cols-12 gap-3">
-        <div className="col-span-12 lg:col-span-8">
-          <div className="h-[420px] sm:h-[500px] lg:h-[560px]">
+        <div className="col-span-12 flex flex-col gap-3 lg:col-span-8">
+          <div className="h-[420px] sm:h-[500px] lg:h-[560px] shrink-0">
             <MapView
               selectedId={mapSelected}
               onSelect={setMapSelected}
@@ -349,6 +392,64 @@ export default function DashboardView({ onNavigate }: { onNavigate: (v: ViewId) 
               </p>
             )}
           </div>
+
+          {/* Region overview — fills the desktop column so the map row lines up
+              with the side stack; all counts/areas computed from the sample set. */}
+          <Panel
+            title="Region overview"
+            meta={<span className="font-mono text-[10px] text-muted">{regionRollups.length} blocks · computed</span>}
+            className="flex-1"
+            action={
+              <button
+                onClick={() => onNavigate("detections")}
+                className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-medium text-accent hover:bg-accent-soft"
+              >
+                Explore<Chevron size={12} />
+              </button>
+            }
+          >
+            <ul className="grid grid-cols-1 divide-y divide-line sm:grid-cols-2 sm:gap-px sm:divide-y-0 lg:grid-cols-2 xl:grid-cols-4">
+              {regionRollups.map((r) => (
+                <li key={r.name} className="bg-panel p-3.5 sm:border-b sm:border-line lg:border-b-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="truncate text-[12px] font-medium text-ink">{r.name}</p>
+                    <span
+                      className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                        r.status === "critical"
+                          ? "bg-danger-soft text-danger"
+                          : r.status === "degraded"
+                            ? "bg-warn-soft text-warn"
+                            : "bg-accent-soft text-accent"
+                      }`}
+                    >
+                      {r.worst ?? r.status}
+                    </span>
+                  </div>
+                  <p className="mt-1.5 flex items-baseline gap-1.5 font-mono tabular-nums">
+                    <span className="text-[16px] font-semibold text-ink">{r.affectedHa} ha</span>
+                    <span className="text-[10px] text-muted">affected</span>
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-muted">
+                    {r.detections} detection{r.detections === 1 ? "" : "s"} · {r.coverage}% coverage
+                  </p>
+                  <div className="mt-2 h-1 rounded-full bg-raised" aria-hidden>
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${Math.max(r.coverage, 6)}%`,
+                        backgroundColor:
+                          r.status === "critical" ? "var(--pl-danger, #C75A50)" : r.status === "degraded" ? "#D6A45B" : "var(--pl-accent)",
+                      }}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <p className="border-t border-line px-4 py-2 text-[10px] text-muted">
+              Blocks without a matching demo entry default to nominal / full coverage — every ha figure is summed from
+              the labelled sample detections, not estimated.
+            </p>
+          </Panel>
         </div>
 
         <div className="col-span-12 flex flex-col gap-3 lg:col-span-4">
