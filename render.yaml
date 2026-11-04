@@ -4,6 +4,7 @@ services:
   - type: web
     name: patchline
     runtime: static
+    autoDeploy: true
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     envVars:
